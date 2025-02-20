@@ -22,18 +22,18 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
         ("My Apartment", CLLocationCoordinate2D(latitude: 39.237425, longitude: -94.593758)),
         ("Winnetonka High School", CLLocationCoordinate2D(latitude: 39.179965, longitude: -94.508675)),
         ("Topping Elementary", CLLocationCoordinate2D(latitude: 39.174553, longitude: -94.511544)),
-        ("Eastgate Middle School", CLLocationCoordinate2D(latitude: 39.166762, longitude: -94.525198)),
+        ("Eastgate Middle School", CLLocationCoordinate2D(latitude: 39.16721078004446, longitude: -94.5257018436461)),
         ("Winnwood Elementary", CLLocationCoordinate2D(latitude: 39.174253, longitude: -94.525643)),
         ("Golden Oaks", CLLocationCoordinate2D(latitude: 39.177669, longitude: -94.542763)),
         //WTHS feeder pattern Group B
         ("Maple Park Middle School", CLLocationCoordinate2D(latitude: 39.19062095283076, longitude: -94.50466599655832)),
         ("Maplewood Elementary", CLLocationCoordinate2D(latitude: 39.18896119942993, longitude: -94.50571840085719)),
         ("Gracemor Elementary", CLLocationCoordinate2D(latitude: 39.18802902087739, longitude: -94.48584136070207)),
-        ("Ravenwood Elementary", CLLocationCoordinate2D(latitude: 39.19968428847097, longitude: -94.51999666393118)),
+        ("Ravenwood Elementary", CLLocationCoordinate2D(latitude: 39.20003624236513, longitude: -94.51935226697785)),
         ("Jacobs Center", CLLocationCoordinate2D(latitude: 39.19778511481334, longitude: -94.50772795337731)),
         ("Pleasant Valley", CLLocationCoordinate2D(latitude: 39.217395595713064, longitude: -94.47976252395783)),
-        //NKC HS feeder pattern
-        ("Northgate Middle School", CLLocationCoordinate2D(latitude: 39.18069968523666, longitude: -94.55454946922964)),
+        //NKHS feeder pattern
+        ("Northgate Middle School", CLLocationCoordinate2D(latitude: 39.180022804850424, longitude: -94.55495502460856)),
         ("Crestview Elementary School", CLLocationCoordinate2D(latitude: 39.173384855187294, longitude: -94.57063386010941)),
         ("Chouteau Elementary School", CLLocationCoordinate2D(latitude: 39.15921142944222, longitude: -94.52968716741535)),
         ("Davidson Elementary School", CLLocationCoordinate2D(latitude: 39.187648911294374, longitude: -94.55828973659732)),
@@ -42,7 +42,8 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     
     private var lastPlaceName: String?
     private var lastDepartureTime: Date?
-
+    private var dwellTimers: [String: DispatchWorkItem] = [:] // Track dwell time for geofences
+    
     override init() {
         super.init()
         locationManager.delegate = self
@@ -106,41 +107,60 @@ class LocationManager: NSObject, ObservableObject, CLLocationManagerDelegate {
     
     func locationManager(_ manager: CLLocationManager, didEnterRegion region: CLRegion) {
         guard let geofenceRegion = region as? CLCircularRegion else { return }
+        let identifier = geofenceRegion.identifier
         
-        let arrivalTime = Date()
-        
-        if let lastPlace = lastPlaceName, let departureTime = lastDepartureTime {
-            let trip = Trip(
-                departedFrom: lastPlace,
-                arrivedAt: geofenceRegion.identifier,
-                departureTime: departureTime,
-                arrivalTime: arrivalTime,
-                currentPlaceName: geofenceRegion.identifier
-            )
-            
-            DispatchQueue.main.async {
-                self.trips.append(trip)
-                print("Trip added: \(trip)")
-            }
+        // Start a dwell timer
+        let dwellWorkItem = DispatchWorkItem {
+            self.recordGeofenceEntry(identifier: identifier)
         }
         
-        lastPlaceName = geofenceRegion.identifier
-        lastDepartureTime = nil
-        print("Arrived at \(geofenceRegion.identifier) at \(arrivalTime)")
+        // Store the timer and execute after 5 seconds
+        dwellTimers[identifier] = dwellWorkItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: dwellWorkItem)
+        
+        print("Entered \(identifier), waiting 30 seconds to confirm stop...")
     }
-    
+
     func locationManager(_ manager: CLLocationManager, didExitRegion region: CLRegion) {
         guard let geofenceRegion = region as? CLCircularRegion else { return }
-        
+        let identifier = geofenceRegion.identifier
+
+        // Cancel dwell timer if user exits early
+        if let dwellWorkItem = dwellTimers[identifier] {
+            dwellWorkItem.cancel()
+            dwellTimers.removeValue(forKey: identifier)
+            print("Exited \(identifier) before dwell time. Entry not recorded.")
+        }
+
         let departureTime = Date()
         lastDepartureTime = departureTime
         lastPlaceName = geofenceRegion.identifier
         print("Departed from \(geofenceRegion.identifier) at \(departureTime)")
     }
-    
-    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
-        print("Location update failed: \(error.localizedDescription)")
+
+    private func recordGeofenceEntry(identifier: String) {
+        let arrivalTime = Date()
+
+        if let lastPlace = lastPlaceName, let departureTime = lastDepartureTime {
+            let trip = Trip(
+                departedFrom: lastPlace,
+                arrivedAt: identifier,
+                departureTime: departureTime,
+                arrivalTime: arrivalTime,
+                currentPlaceName: identifier
+            )
+
+            DispatchQueue.main.async {
+                self.trips.append(trip)
+                print("Trip added: \(trip)")
+            }
+        }
+
+        lastPlaceName = identifier
+        lastDepartureTime = nil
+        print("Confirmed stop at \(identifier) after 5 seconds.")
     }
 }
+
 
 
